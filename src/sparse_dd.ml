@@ -339,46 +339,51 @@ let _ =
 		end in
 
 	let open Lwt in
-	let stream_t, destination, destination_format = match !experimental_reads_bypass_tapdisk, src, src_image, !experimental_writes_bypass_tapdisk, dest, dest_image with
-        | true, _, Some (`Vhd vhd), true, _, Some (`Vhd vhd') ->
-		prezeroed := false; (* the physical disk will have vhd metadata and other stuff on it *)
-		info "streaming from vhd %s (relative to %s) to vhd %s" vhd (string_opt relative_to) vhd';
-        	let t = Impl.make_stream common vhd relative_to "vhd" "vhd" in
-		t, "file://" ^ vhd', "vhd"
-	| false, _, _, true, _, _ ->
-		error "Not implemented: writes bypass tapdisk while reads go through tapdisk";
-		failwith "Not implemented: writing bypassing tapdisk while reading through tapdisk"
-	| false, _, Some (`Vhd vhd), false, _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s using BAT from %s (relative to %s) to raw %s" src vhd (string_opt relative_to) dest;
-		let t = Impl.make_stream common (src ^ ":" ^ vhd) relative_to "hybrid" "raw" in
-		t, dest, "raw"
-        | true, _, Some (`Vhd vhd), _, _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from vhd %s (relative to %s) to raw %s" vhd (string_opt relative_to) dest;
-        	let t = Impl.make_stream common vhd relative_to "vhd" "raw" in
-		t, dest, "raw"
-        | _, _, Some (`Raw raw), _, _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s (relative to %s) to raw %s" raw (string_opt relative_to) dest;
-        	let t = Impl.make_stream common raw relative_to "raw" "raw" in
-		t, dest, "raw"
-        | _, device, None, _, _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s (relative to %s) to raw %s" src (string_opt relative_to) dest;
-        	let t = Impl.make_stream common device relative_to "raw" "raw" in
-		t, dest, "raw" in
+	let stream_t, destination, destination_format = begin
+    match !experimental_reads_bypass_tapdisk, src, src_image, !experimental_writes_bypass_tapdisk, dest, dest_image with
+    | true, _, Some (`Vhd vhd), true, _, Some (`Vhd vhd') ->
+        prezeroed := false; (* the physical disk will have vhd metadata and other stuff on it *)
+        info "streaming from vhd %s (relative to %s) to vhd %s" vhd (string_opt relative_to) vhd';
+        let t = Impl.make_stream common vhd relative_to "vhd" "vhd" in
+        t, "file://" ^ vhd', "vhd"
+    | false, _, _, true, _, _ ->
+        error "Not implemented: writes bypass tapdisk while reads go through tapdisk";
+        failwith "Not implemented: writing bypassing tapdisk while reading through tapdisk"
+    | false, _, Some (`Vhd vhd), false, _, _ ->
+        let dest = rewrite_url dest in
+        info "streaming from raw %s using BAT from %s (relative to %s) to raw %s" src vhd (string_opt relative_to) dest;
+        let t = Impl.make_stream common (src ^ ":" ^ vhd) relative_to "hybrid" "raw" in
+        t, dest, "raw"
+    | true, _, Some (`Vhd vhd), _, _, _ ->
+        let dest = rewrite_url dest in
+        info "streaming from vhd %s (relative to %s) to raw %s" vhd (string_opt relative_to) dest;
+        let t = Impl.make_stream common vhd relative_to "vhd" "raw" in
+        t, dest, "raw"
+    | _, _, Some (`Raw raw), _, _, _ ->
+        let dest = rewrite_url dest in
+        info "streaming from raw %s (relative to %s) to raw %s" raw (string_opt relative_to) dest;
+        let t = Impl.make_stream common raw relative_to "raw" "raw" in
+        t, dest, "raw"
+    | _, device, None, _, _, _ ->
+        let dest = rewrite_url dest in
+        info "streaming from raw %s (relative to %s) to raw %s" src (string_opt relative_to) dest;
+        let t = Impl.make_stream common device relative_to "raw" "raw" in
+        t, dest, "raw"
+  end in
 
-	progress_cb 0.;
-        let progress total_work work_done =
-          let fraction = Int64.(to_float work_done /. (to_float total_work)) in
-          progress_cb fraction in
-        let t =
-        	stream_t >>= fun s ->
-		Impl.write_stream common s destination (Some "none") None !prezeroed progress None !ssl_legacy !good_ciphersuites !legacy_ciphersuites in
-	if destination_format = "vhd"
-	then with_paused_tapdisk dest (fun () -> Lwt_main.run t)
-	else Lwt_main.run t;
-	let time = Unix.gettimeofday () -. start in
-	debug "Time: %.2f seconds" time;
-	Progress.close ()
+  progress_cb 0.;
+  let progress total_work work_done =
+    let fraction = Int64.(to_float work_done /. (to_float total_work)) in
+    progress_cb fraction
+  in
+  let t =
+    stream_t >>= fun s ->
+      Impl.write_stream common s destination (Some "none") None !prezeroed progress None !ssl_legacy !good_ciphersuites !legacy_ciphersuites
+  in
+  if destination_format = "vhd" then
+    with_paused_tapdisk dest (fun () -> Lwt_main.run t)
+  else
+    Lwt_main.run t;
+  let time = Unix.gettimeofday () -. start in
+  debug "Time: %.2f seconds" time;
+  Progress.close ()
