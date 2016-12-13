@@ -665,7 +665,6 @@ let make_stream common source relative_to source_format destination_format =
 
 let write_stream common s destination source_protocol destination_protocol prezeroed progress tar_filename_prefix ssl_legacy good_ciphersuites legacy_ciphersuites = 
   endpoint_of_string destination >>= fun endpoint ->
-  let use_ssl = match endpoint with Https _ -> true | _ -> false in
   ( match endpoint with
     | File path ->
       Lwt_unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT ] 0o0644 >>= fun fd ->
@@ -689,6 +688,7 @@ let write_stream common s destination source_protocol destination_protocol preze
     | Https uri'
     | Http uri' ->
       (* TODO: https is not currently implemented *)
+      let use_ssl = match endpoint with Https _ -> true | _ -> false in
       let port = match Uri.port uri' with None -> (if use_ssl then 443 else 80) | Some port -> port in
       let host = match Uri.host uri' with None -> failwith "Please supply a host in the URI" | Some host -> host in
       Lwt_unix.gethostbyname host >>= fun host_entry ->
