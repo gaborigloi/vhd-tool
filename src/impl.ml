@@ -217,8 +217,8 @@ let stream_nbd common c s prezeroed _ ?(progress = no_progress_bar) () =
       | `Sectors data ->
         Client.write server (Int64.mul sector 512L) [data] >>= begin
           function
-          | `Ok () -> return Int64.(of_int (Cstruct.len data))
-          | `Error e -> fail (Failure "Got error from NBD library")
+          | Ok () -> return Int64.(of_int (Cstruct.len data))
+          | Error e -> fail (Failure "Got error from NBD library")
         end
       | `Empty n -> (* must be prezeroed *)
         assert prezeroed;
@@ -828,8 +828,8 @@ let serve_nbd_to_raw common size c dest _ _ _ _ =
   let rec serve_requests () =
     c.Channels.really_read req >>= fun () ->
     match Request.unmarshal req with
-    | `Error e -> fail e
-    | `Ok request ->
+    | Error e -> fail e
+    | Ok request ->
       if common.Common.debug
       then Printf.fprintf stderr "%s\n%!" (Request.to_string request);
       begin match request.Request.ty with
@@ -838,17 +838,17 @@ let serve_nbd_to_raw common size c dest _ _ _ _ =
           c.Channels.really_read subblock >>= fun () ->
           Vhd_lwt.IO.really_write dest offset subblock
         ) request >>= fun () ->
-        Reply.marshal rep { Reply.error = `Ok (); handle = request.Request.handle };
+        Reply.marshal rep { Reply.error = Ok (); handle = request.Request.handle };
         c.Channels.really_write rep
       | Command.Read ->
-        Reply.marshal rep { Reply.error = `Ok (); handle = request.Request.handle };
+        Reply.marshal rep { Reply.error = Ok (); handle = request.Request.handle };
         c.Channels.really_write rep >>= fun () ->
         inblocks (fun offset subblock ->
           Vhd_lwt.IO.really_read dest offset subblock >>= fun () ->
           c.Channels.really_write subblock
         ) request
       | _ ->
-        Reply.marshal rep { Reply.error = `Error `EPERM; handle = request.Request.handle };
+        Reply.marshal rep { Reply.error = Error `EPERM; handle = request.Request.handle };
         c.Channels.really_write rep
       end >>= fun () ->
       serve_requests () in
