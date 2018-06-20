@@ -335,44 +335,61 @@ let _ =
 			warn "turning on encryption for this transfer as requested by config file";
 			rewrite_scheme "https"
 		| Some ("http" | "https") -> device_or_url
+    | Some "nbd" -> device_or_url
 		| _ -> "file://" ^ device_or_url
 		end in
 
+  let source_type =
+    match Uri.of_string src |> Uri.scheme with
+    | Some "nbd" -> `Nbd
+    | _ -> `Raw
+  in
+
 	let open Lwt in
 	let stream_t, destination, destination_format =
-		match !experimental_reads_bypass_tapdisk, src_image, !experimental_writes_bypass_tapdisk, dest_image with
-		| true, Some (`Vhd vhd), true, Some (`Vhd vhd') ->
-		prezeroed := false; (* the physical disk will have vhd metadata and other stuff on it *)
-		info "streaming from vhd %s (relative to %s) to vhd %s" vhd (string_opt relative_to) vhd';
-		let t = Impl.make_stream common vhd relative_to "vhd" "vhd" in
-		t, "file://" ^ vhd', "vhd"
-	| false, _, true, _ ->
-		error "Not implemented: writes bypass tapdisk while reads go through tapdisk";
-		failwith "Not implemented: writing bypassing tapdisk while reading through tapdisk"
-	| false, Some (`Vhd vhd), false, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s using BAT from %s (relative to %s) to raw %s" src vhd (string_opt relative_to) dest;
-		let t = Impl.make_stream common (src ^ ":" ^ vhd) relative_to "hybrid" "raw" in
-		t, dest, "raw"
-	| _, Some (`Nbd (server, export_name)), _, _ ->
-		let dest = rewrite_url dest in
-		let t = Impl.make_stream common (src ^ ":" ^ server ^ ":" ^ export_name ^ ":" ^ (Int64.to_string size)) None "nbdhybrid" "raw" in
-		t, dest, "raw"
-	| true, Some (`Vhd vhd), _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from vhd %s (relative to %s) to raw %s" vhd (string_opt relative_to) dest;
-		let t = Impl.make_stream common vhd relative_to "vhd" "raw" in
-		t, dest, "raw"
-	| _, Some (`Raw raw), _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s (relative to %s) to raw %s" raw (string_opt relative_to) dest;
-		let t = Impl.make_stream common raw relative_to "raw" "raw" in
-		t, dest, "raw"
-	| _, None, _, _ ->
-		let dest = rewrite_url dest in
-		info "streaming from raw %s (relative to %s) to raw %s" src (string_opt relative_to) dest;
-		let t = Impl.make_stream common src relative_to "raw" "raw" in
-		t, dest, "raw" in
+    match source_type with
+    | `Raw -> begin
+        match !experimental_reads_bypass_tapdisk, src_image, !experimental_writes_bypass_tapdisk, dest_image with
+        | true, Some (`Vhd vhd), true, Some (`Vhd vhd') ->
+          prezeroed := false; (* the physical disk will have vhd metadata and other stuff on it *)
+          info "streaming from vhd %s (relative to %s) to vhd %s" vhd (string_opt relative_to) vhd';
+          let t = Impl.make_stream common vhd relative_to "vhd" "vhd" in
+          t, "file://" ^ vhd', "vhd"
+        | false, _, true, _ ->
+          error "Not implemented: writes bypass tapdisk while reads go through tapdisk";
+          failwith "Not implemented: writing bypassing tapdisk while reading through tapdisk"
+        | false, Some (`Vhd vhd), false, _ ->
+          let dest = rewrite_url dest in
+          info "streaming from raw %s using BAT from %s (relative to %s) to raw %s" src vhd (string_opt relative_to) dest;
+          let t = Impl.make_stream common (src ^ ":" ^ vhd) relative_to "hybrid" "raw" in
+          t, dest, "raw"
+        | _, Some (`Nbd (server, export_name)), _, _ ->
+          let dest = rewrite_url dest in
+          info "streaming from raw %s using allocated blocks from %s (relative to %s) to raw %s" src server (string_opt relative_to) dest;
+          let t = Impl.make_stream common (src ^ ":" ^ server ^ ":" ^ export_name ^ ":" ^ (Int64.to_string size)) None "nbdhybrid" "raw" in
+          t, dest, "raw"
+        | true, Some (`Vhd vhd), _, _ ->
+          let dest = rewrite_url dest in
+          info "streaming from vhd %s (relative to %s) to raw %s" vhd (string_opt relative_to) dest;
+          let t = Impl.make_stream common vhd relative_to "vhd" "raw" in
+          t, dest, "raw"
+        | _, Some (`Raw raw), _, _ ->
+          let dest = rewrite_url dest in
+          info "streaming from raw %s (relative to %s) to raw %s" raw (string_opt relative_to) dest;
+          let t = Impl.make_stream common raw relative_to "raw" "raw" in
+          t, dest, "raw"
+        | _, None, _, _ ->
+          let dest = rewrite_url dest in
+          info "streaming from raw %s (relative to %s) to raw %s" src (string_opt relative_to) dest;
+          let t = Impl.make_stream common src relative_to "raw" "raw" in
+          t, dest, "raw"
+      end
+    | `Nbd ->
+      let dest = rewrite_url dest in
+      info "streaming from nbd %s (relative to %s) to raw %s" src (string_opt relative_to) dest;
+      let t = Impl.make_stream common src relative_to "nbd" "raw" in
+      t, dest, "raw"
+  in
 
 	progress_cb 0.;
 	let progress total_work work_done =

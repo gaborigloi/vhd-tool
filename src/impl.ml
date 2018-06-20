@@ -200,11 +200,11 @@ let stream_human common _ s _ _ ?(progress = no_progress_bar) () =
   Printf.printf "# end of stream\n";
   return None
 
-let stream_nbd common c s prezeroed _ ?(progress = no_progress_bar) () =
+let stream_nbd exportname common c s prezeroed _ ?(progress = no_progress_bar) () =
   let open Nbd_lwt_unix in
   let c = { Nbd.Channel.read = c.Channels.really_read; write = c.Channels.really_write; close = c.Channels.close; is_tls = false } in
 
-  Client.negotiate c "" >>= fun (server, size, flags) ->
+  Client.negotiate c exportname >>= fun (server, size, flags) ->
   (* Work to do is: non-zero data to write + empty sectors if the
      target is not prezeroed *)
   let total_work = let open Vhd_format.F in Int64.(add (add s.size.metadata s.size.copy) (if prezeroed then 0L else s.size.empty)) in
@@ -569,6 +569,9 @@ type endpoint =
   | Http of Uri.t
   | Https of Uri.t
 
+let parse_nbd_uri uri =
+  Storage_interface.parse_nbd_uri {Storage_interface.uri=uri}
+
 let endpoint_of_string = function
   | "stdout:" -> return Stdout
   | "null:" -> return Null
@@ -590,11 +593,19 @@ let endpoint_of_string = function
       return (Http uri')
     | Some "https", _ ->
       return (Https uri')
+    | Some "nbd", _ ->
+      let (unix_socket_path, _export_name) = parse_nbd_uri uri in
+      return (Sockaddr(Lwt_unix.ADDR_UNIX(unix_socket_path)))
     | Some x, _ ->
       fail (Failure (Printf.sprintf "Unknown URI scheme: %s" x))
     | None, _ ->
       fail (Failure (Printf.sprintf "Failed to parse URI: %s" uri))
     end
+
+let nbd_exportname_of_destination destination =
+  match parse_nbd_uri destination with
+  | (_unix_socket_path, export_name) -> export_name
+  | exception _ -> ""
 
 let socket sockaddr =
   let family = match sockaddr with
@@ -625,12 +636,15 @@ let retry common retries f =
     [destination_format] specifies the format of the returned data stream. *)
 let make_stream common source relative_to source_format destination_format =
   match source_format, destination_format with
+  | "nbd", "raw" ->
+    let (nbd_server, export_name) = parse_nbd_uri source in
+    Nbd_input.nbd nbd_server export_name
   | "nbdhybrid", "raw" ->
     begin match Re.Str.bounded_split colon source 4 with
     | [ raw; nbd_server; export_name; size ] -> begin
       let size = Int64.of_string size in
       Vhd_format_lwt.IO.openfile raw false >>= fun raw ->
-      Nbd_input.raw raw nbd_server export_name size
+      Nbd_input.hybrid raw nbd_server export_name size
       end
     | _ ->
       fail (Failure (Printf.sprintf "Failed to parse nbdhybrid source: %s (expecting <raw_disk>:<nbd_server>:<export_name>:<size>" source))
@@ -785,7 +799,7 @@ let write_stream common s destination destination_protocol prezeroed progress ta
     else
       let start = Unix.gettimeofday () in
       (match destination_protocol with
-          | Nbd -> stream_nbd
+          | Nbd -> stream_nbd (nbd_exportname_of_destination destination)
           | Human -> stream_human
           | Chunked -> stream_chunked
           | Tar -> stream_tar

@@ -19,6 +19,7 @@
     vhd-format
     vhd-format-lwt
     xapi-tapctl
+    xcp.storage.interface
     xenstore.client
     xenstore.unix
     xenstore_transport

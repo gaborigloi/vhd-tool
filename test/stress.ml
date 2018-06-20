@@ -8,7 +8,12 @@ let size = Int64.(mul 4L (mul 1024L (mul 1024L (mul 1024L 1024L))))
 let rec process_stream total = function
   | F.Cons (data, s) ->
     let sectors = match data with
-      | `Empty sectors | `Copy (_, _, sectors) -> sectors
+      | `Empty sectors -> sectors
+      | `Data (offset, sectors) ->
+        if offset <> total then begin
+          Alcotest.failf "wrong offset: processed %Ld, offset is %Ld" total offset;
+        end;
+        sectors
       | _ -> failwith "unexpected element"
     in
     s () >>= fun s ->
@@ -16,13 +21,12 @@ let rec process_stream total = function
   | F.End -> Lwt.return total
 
 let test_huge_input switch () =
-  let raw = `anything in
   let server = "" in
   let export_name = "" in
-  Nbd_input.raw ~extent_reader:"./dummy_extent_reader.py" raw server export_name size >>= fun s ->
-  process_stream 0L s.F.elements >|= fun sectors ->
+  Nbd_input.get_extents ~extent_reader:"./dummy_extent_reader.py" server export_name size >>= fun extents ->
+  process_stream 0L extents >|= fun sectors ->
   Alcotest.(check int64) "total size of elements in stream"
-    s.F.size.total
+    size
     (Int64.mul 512L sectors)
 
 let test_set =
